@@ -19,7 +19,7 @@ blender_version_min = "4.4.3"
 tags = ["Math", "Vector", "Linear Algebra", "Transformation", "Geometry"]
 
 # License (SPDX format)
-license = "SPDX:GPL-3.0-or-later"
+license = ["GPL-3.0-or-later"]
 
 # Optional: Copyright information
 # copyright = "2024 HvoykaITMO"
