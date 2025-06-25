@@ -76,7 +76,7 @@ class RecreateEndomorphismObject(bpy.types.Operator):
         bpy.ops.mesh.primitive_uv_sphere_add(
             segments=segments,
             ring_count=rings,
-            radius=radius,
+            radius=1,
             location=obj.location
         )
         new_sphere = context.active_object
