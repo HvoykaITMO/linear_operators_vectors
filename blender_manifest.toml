@@ -1,0 +1,25 @@
+schema_version = "1.0.0"
+
+id = "linear_operators_vectors"
+version = "1.0.0"
+name = "Linear Operators and Vectors"
+tagline = "Vectors and linear operators with sphere domain in Blender"
+description = "This addon allows creating vectors and linear operators, applying operators to vectors within a sphere domain."
+type = "add-on"
+
+maintainer = "Your Name <your.email@example.com>"
+
+# Supported Blender versions
+blender_version_min = "4.4.3"
+
+# Optional: Link to documentation/support
+# website = "https://github.com/yourusername/linear_operators_addon"
+
+# Recommended tags (choose 3-5 relevant)
+tags = ["Math", "Vector", "Linear Algebra", "Transformation", "Geometry"]
+
+# License (SPDX format)
+license = "SPDX:GPL-3.0-or-later"
+
+# Optional: Copyright information
+# copyright = "2024 Your Name"

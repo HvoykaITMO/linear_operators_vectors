@@ -1,98 +1,112 @@
 import bpy
 import mathutils
 import uuid
-import os
-import sys
 from bpy.props import BoolProperty, FloatVectorProperty, PointerProperty, FloatProperty, IntProperty, StringProperty
 from bpy.types import Context, Event
+from .vector_object import update_vector_end
 
-vector_object = bpy.data.texts["vector_object.py"].as_module()
+# --- Функции-обновления свойств эндоморфизма ---
 
 
 def update_radius(self, context):
-    obj = self.id_data  # объект, к которому привязаны свойства
+    """
+    Обновляет масштаб сферы-оператора при изменении радиуса,
+    а также пересчитывает все векторы, к которым применён этот оператор.
+    """
+    obj = self.id_data
     if hasattr(obj, "scale"):
         obj.scale = (self.radius, self.radius, self.radius)
-
-        # Далее для пересчёта снова проходимся по векторам
+        # Пересчитать все связанные векторы
         for obj in bpy.data.objects:
-            if hasattr(obj, "vector_props") and getattr(obj.vector_props, "is_vector", False):  # type: ignore
-                for applied_op in obj.vector_props.applied_endomorphisms:  # type: ignore
+            if hasattr(obj, "vector_props") and getattr(obj.vector_props, "is_vector", False):
+                for applied_op in obj.vector_props.applied_endomorphisms:
                     if applied_op.endomorphism_uuid == self.uuid:
-                        vector_object.update_vector_end(
-                            obj.vector_props, context)  # type: ignore
+                        update_vector_end(obj.vector_props, context)
 
 
 def update_matrix(self, context):
-    obj = self.id_data  # объект-сфера, к которому привязан PropertyGroup
-    # Здесь можно, например, пересчитать и сохранить матрицу (или применить к чему-то)
-    # Далее идёт просто
+    """
+    Обновляет все векторы, использующие данный оператор,
+    при изменении хотя бы одного столбца матрицы.
+    """
+    obj = self.id_data
     col0 = mathutils.Vector(self.matrix_col0)
     col1 = mathutils.Vector(self.matrix_col1)
     col2 = mathutils.Vector(self.matrix_col2)
-    mat = mathutils.Matrix((col0, col1, col2)).transposed()  # type: ignore
-
+    mat = mathutils.Matrix((col0, col1, col2)).transposed()
+    # Обновить все связанные векторы
     for obj in bpy.data.objects:
-        if hasattr(obj, "vector_props") and getattr(obj.vector_props, "is_vector", False):  # type: ignore
-            for applied_op in obj.vector_props.applied_endomorphisms:  # type: ignore
+        if hasattr(obj, "vector_props") and getattr(obj.vector_props, "is_vector", False):
+            for applied_op in obj.vector_props.applied_endomorphisms:
                 if applied_op.endomorphism_uuid == self.uuid:
-                    vector_object.update_vector_end(
-                        obj.vector_props, context)  # type: ignore
+                    update_vector_end(obj.vector_props, context)
 
 
 def update_all_endomorphisms(scene):
+    """
+    Обработчик кадра: обновляет масштаб и матрицу всех эндоморфизмов на каждом кадре (для поддержки анимации).
+    """
     for obj in bpy.data.objects:
-        if hasattr(obj, "endomorphism_props") and getattr(obj.endomorphism_props, "is_endomorphism", False):  # type: ignore
-            props = obj.endomorphism_props  # type: ignore
+        if hasattr(obj, "endomorphism_props") and getattr(obj.endomorphism_props, "is_endomorphism", False):
+            props = obj.endomorphism_props
             obj.scale = (props.radius, props.radius, props.radius)
-            obj.endomorphism_props.matrix_col0 = props.matrix_col0  # type: ignore
-            obj.endomorphism_props.matrix_col1 = props.matrix_col1  # type: ignore
-            obj.endomorphism_props.matrix_col2 = props.matrix_col2  # type: ignore
-            obj.endomorphism_props.radius = props.radius  # type: ignore
+            obj.endomorphism_props.matrix_col0 = props.matrix_col0
+            obj.endomorphism_props.matrix_col1 = props.matrix_col1
+            obj.endomorphism_props.matrix_col2 = props.matrix_col2
+            obj.endomorphism_props.radius = props.radius
+
+# --- Операторы ---
 
 
 class RecreateEndomorphismObject(bpy.types.Operator):
+    """
+    Оператор для пересоздания сферы-оператора с новыми параметрами (например, сегментами или кольцами).
+    """
     bl_idname = "object.recreate_endomorphism_object"
     bl_label = "Recreate Sphere"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         obj = context.object
+        segments = obj.endomorphism_props.segments_amount
+        rings = obj.endomorphism_props.rings_amount
+        radius = obj.endomorphism_props.radius
 
-        segments = obj.endomorphism_props.segments_amount  # type: ignore
-        rings = obj.endomorphism_props.rings_amount  # type: ignore
-        radius = obj.endomorphism_props.radius  # type: ignore
-
+        # Создаём новую сферу с заданными параметрами
         bpy.ops.mesh.primitive_uv_sphere_add(
             segments=segments,
             ring_count=rings,
-            radius=radius,  # Базовый радиус
-            location=obj.location  # type: ignore
+            radius=radius,
+            location=obj.location
         )
-
         new_sphere = context.active_object
-        new_sphere.display_type = 'WIRE'  # type: ignore
+        new_sphere.display_type = 'WIRE'
 
-        old_name = obj.name  # type: ignore
+        old_name = obj.name
 
-        new_sphere.endomorphism_props.is_endomorphism = True  # type: ignore
-        new_sphere.endomorphism_props.uuid = obj.endomorphism_props.uuid  # type: ignore
-        new_sphere.endomorphism_props.radius = radius  # type: ignore
-        new_sphere.endomorphism_props.segments_amount = segments  # type: ignore
-        new_sphere.endomorphism_props.rings_amount = rings  # type: ignore
-        new_sphere.endomorphism_props.matrix_col0 = obj.endomorphism_props.matrix_col0  # type: ignore
-        new_sphere.endomorphism_props.matrix_col1 = obj.endomorphism_props.matrix_col1  # type: ignore
-        new_sphere.endomorphism_props.matrix_col2 = obj.endomorphism_props.matrix_col2  # type: ignore
+        # Копируем все свойства
+        new_sphere.endomorphism_props.is_endomorphism = True
+        new_sphere.endomorphism_props.uuid = obj.endomorphism_props.uuid
+        new_sphere.endomorphism_props.radius = radius
+        new_sphere.endomorphism_props.segments_amount = segments
+        new_sphere.endomorphism_props.rings_amount = rings
+        new_sphere.endomorphism_props.matrix_col0 = obj.endomorphism_props.matrix_col0
+        new_sphere.endomorphism_props.matrix_col1 = obj.endomorphism_props.matrix_col1
+        new_sphere.endomorphism_props.matrix_col2 = obj.endomorphism_props.matrix_col2
 
-        bpy.data.objects.remove(obj, do_unlink=True)  # type: ignore
-
-        new_sphere.name = old_name  # type: ignore
+        bpy.data.objects.remove(obj, do_unlink=True)
+        new_sphere.name = old_name
 
         self.report({'INFO'}, "Sphere recreated")
         return {'FINISHED'}
 
+# --- Свойства эндоморфизма ---
+
 
 class EndomorphismProperties(bpy.types.PropertyGroup):
+    """
+    Свойства линейного оператора (эндоморфизма), включая UUID, матрицу, радиус и параметры сферы.
+    """
     uuid: StringProperty(
         name="UUID",
         default=""
@@ -141,6 +155,9 @@ class EndomorphismProperties(bpy.types.PropertyGroup):
 
 
 class AddEndomorphismObject(bpy.types.Operator):
+    """
+    Оператор для создания нового линейного оператора (эндоморфизма) в виде сферы.
+    """
     bl_idname = "mesh.add_endomorphism_object"
     bl_label = "Endomorphism"
     bl_options = {'REGISTER', 'UNDO'}
@@ -182,22 +199,23 @@ class AddEndomorphismObject(bpy.types.Operator):
     )
 
     def execute(self, context: Context):
+        # Создаём сферу-оператор с заданными параметрами
         bpy.ops.mesh.primitive_uv_sphere_add(
             radius=1, segments=self.segments_amount, ring_count=self.rings_amount, location=(0, 0, 0))
         sphere = bpy.context.active_object
-        sphere.display_type = 'WIRE'  # type: ignore
-        sphere.name = "Endomorphism"  # type: ignore
-        sphere.scale = (self.radius, self.radius, self.radius)  # type: ignore
+        sphere.display_type = 'WIRE'
+        sphere.name = "Endomorphism"
+        sphere.scale = (self.radius, self.radius, self.radius)
 
-        # Инициализация свойств
-        sphere.endomorphism_props.uuid = str(uuid.uuid4())  # type: ignore
-        sphere.endomorphism_props.is_endomorphism = True  # type: ignore
-        sphere.endomorphism_props.matrix_col0 = self.matrix_col0  # type: ignore
-        sphere.endomorphism_props.matrix_col1 = self.matrix_col1  # type: ignore
-        sphere.endomorphism_props.matrix_col2 = self.matrix_col2  # type: ignore
-        sphere.endomorphism_props.radius = self.radius  # type: ignore
-        sphere.endomorphism_props.segments_amount = self.segments_amount  # type: ignore
-        sphere.endomorphism_props.rings_amount = self.rings_amount  # type: ignore
+        # Инициализация свойств PropertyGroup
+        sphere.endomorphism_props.uuid = str(uuid.uuid4())
+        sphere.endomorphism_props.is_endomorphism = True
+        sphere.endomorphism_props.matrix_col0 = self.matrix_col0
+        sphere.endomorphism_props.matrix_col1 = self.matrix_col1
+        sphere.endomorphism_props.matrix_col2 = self.matrix_col2
+        sphere.endomorphism_props.radius = self.radius
+        sphere.endomorphism_props.segments_amount = self.segments_amount
+        sphere.endomorphism_props.rings_amount = self.rings_amount
 
         self.report({'INFO'}, f"Endomorphism created")
         return {'FINISHED'}
@@ -221,6 +239,9 @@ class AddEndomorphismObject(bpy.types.Operator):
 
 
 class Endomorphism_PT_PANEL(bpy.types.Panel):
+    """
+    Панель свойств для выбранного эндоморфизма (отображается только для объектов-операторов).
+    """
     bl_label = "Properties"
     bl_idname = 'Endomorphism_PT_Panel'
     bl_space_type = 'VIEW_3D'
@@ -230,15 +251,15 @@ class Endomorphism_PT_PANEL(bpy.types.Panel):
     @classmethod
     def poll(cls, context):
         obj = context.object
-        is_great = obj is not None and hasattr(  # type: ignore
-            obj, "endomorphism_props") and getattr(obj.endomorphism_props, "is_endomorphism", False)  # type: ignore
+        # Панель показывается только для объектов с PropertyGroup эндоморфизма
+        is_great = obj is not None and hasattr(
+            obj, "endomorphism_props") and getattr(obj.endomorphism_props, "is_endomorphism", False)
         return is_great
 
     def draw(self, context):
         layout = self.layout
         obj = context.object
-
-        props = obj.endomorphism_props  # type: ignore
+        props = obj.endomorphism_props
 
         layout.label(text="Matrix:")
         row = layout.row(align=True)
@@ -259,8 +280,12 @@ class Endomorphism_PT_PANEL(bpy.types.Panel):
 
 
 def menu_func(self, context):
-    self.layout.operator(AddEndomorphismObject.bl_idname,
-                         icon='SPHERE')
+    """
+    Добавляет пункт создания эндоморфизма в меню Shift+A → Mesh.
+    """
+    self.layout.operator(AddEndomorphismObject.bl_idname, icon='SPHERE')
+
+# --- Регистрация классов и свойств ---
 
 
 def register():
@@ -268,8 +293,8 @@ def register():
     bpy.utils.register_class(EndomorphismProperties)
     bpy.utils.register_class(AddEndomorphismObject)
     bpy.utils.register_class(Endomorphism_PT_PANEL)
-    bpy.types.Object.endomorphism_props = PointerProperty(  # type: ignore
-        type=EndomorphismProperties)  # type: ignore
+    bpy.types.Object.endomorphism_props = PointerProperty(
+        type=EndomorphismProperties)
     bpy.types.VIEW3D_MT_mesh_add.append(menu_func)
     bpy.app.handlers.frame_change_post.append(update_all_endomorphisms)
 
@@ -280,7 +305,7 @@ def unregister():
     bpy.utils.unregister_class(EndomorphismProperties)
     bpy.utils.unregister_class(AddEndomorphismObject)
     bpy.utils.unregister_class(Endomorphism_PT_PANEL)
-    del bpy.types.Object.endomorphism_props  # type: ignore
+    del bpy.types.Object.endomorphism_props
     if update_all_endomorphisms in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.remove(update_all_endomorphisms)
 
