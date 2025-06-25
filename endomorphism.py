@@ -1,13 +1,26 @@
 import bpy
 import mathutils
 import uuid
+import os
+import sys
 from bpy.props import BoolProperty, FloatVectorProperty, PointerProperty, FloatProperty, IntProperty, StringProperty
 from bpy.types import Context, Event
+
+vector_object = bpy.data.texts["vector_object.py"].as_module()
 
 
 def update_radius(self, context):
     obj = self.id_data  # объект, к которому привязаны свойства
-    obj.scale = (self.radius, self.radius, self.radius)
+    if hasattr(obj, "scale"):
+        obj.scale = (self.radius, self.radius, self.radius)
+
+        # Далее для пересчёта снова проходимся по векторам
+        for obj in bpy.data.objects:
+            if hasattr(obj, "vector_props") and getattr(obj.vector_props, "is_vector", False):  # type: ignore
+                for applied_op in obj.vector_props.applied_endomorphisms:  # type: ignore
+                    if applied_op.endomorphism_uuid == self.uuid:
+                        vector_object.update_vector_end(
+                            obj.vector_props, context)  # type: ignore
 
 
 def update_matrix(self, context):
@@ -18,10 +31,13 @@ def update_matrix(self, context):
     col1 = mathutils.Vector(self.matrix_col1)
     col2 = mathutils.Vector(self.matrix_col2)
     mat = mathutils.Matrix((col0, col1, col2)).transposed()  # type: ignore
-    # Вывод в консоль (просто для удобства)
-    print("Матрица оператора обновлена:", mat)
-    print()
-    print(col0)
+
+    for obj in bpy.data.objects:
+        if hasattr(obj, "vector_props") and getattr(obj.vector_props, "is_vector", False):  # type: ignore
+            for applied_op in obj.vector_props.applied_endomorphisms:  # type: ignore
+                if applied_op.endomorphism_uuid == self.uuid:
+                    vector_object.update_vector_end(
+                        obj.vector_props, context)  # type: ignore
 
 
 def update_all_endomorphisms(scene):
@@ -60,7 +76,7 @@ class RecreateEndomorphismObject(bpy.types.Operator):
         old_name = obj.name  # type: ignore
 
         new_sphere.endomorphism_props.is_endomorphism = True  # type: ignore
-        new_sphere.endomorphism_props.uuid = obj.endomorphism_props.uuid
+        new_sphere.endomorphism_props.uuid = obj.endomorphism_props.uuid  # type: ignore
         new_sphere.endomorphism_props.radius = radius  # type: ignore
         new_sphere.endomorphism_props.segments_amount = segments  # type: ignore
         new_sphere.endomorphism_props.rings_amount = rings  # type: ignore
@@ -167,10 +183,11 @@ class AddEndomorphismObject(bpy.types.Operator):
 
     def execute(self, context: Context):
         bpy.ops.mesh.primitive_uv_sphere_add(
-            radius=self.radius, segments=self.segments_amount, ring_count=self.rings_amount, location=(0, 0, 0))
+            radius=1, segments=self.segments_amount, ring_count=self.rings_amount, location=(0, 0, 0))
         sphere = bpy.context.active_object
         sphere.display_type = 'WIRE'  # type: ignore
         sphere.name = "Endomorphism"  # type: ignore
+        sphere.scale = (self.radius, self.radius, self.radius)  # type: ignore
 
         # Инициализация свойств
         sphere.endomorphism_props.uuid = str(uuid.uuid4())  # type: ignore

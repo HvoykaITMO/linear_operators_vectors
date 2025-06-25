@@ -1,7 +1,6 @@
 import bpy
 from bpy.props import FloatVectorProperty, BoolProperty, EnumProperty, PointerProperty, StringProperty, IntProperty
 from bpy.types import Context, Event
-from typing import Literal
 import mathutils
 
 
@@ -13,19 +12,60 @@ def force_ui_redraw(context):
                 area.tag_redraw()
 
 
+def find_endomorphism_by_uuid(uuid):
+    """Возвращает объект-оператор по uuid, если найден"""
+    for obj in bpy.data.objects:
+        if hasattr(obj, "endomorphism_props") and getattr(obj.endomorphism_props, "uuid", None) == uuid:  # type: ignore
+            return obj
+    return None
+
+
+def is_point_inside_sphere(point, sphere_center, sphere_radius):
+    return (point - sphere_center).length_squared <= sphere_radius * sphere_radius
+
+
+def apply_endomorphisms(vector_obj):
+    """Преобразует координаты конца вектора с помощью всех применённых операторов"""
+    props = vector_obj.vector_props
+    # Исходная точка (конец радиус-вектора)
+    vec = mathutils.Vector(props.vector_end)
+
+    # Применяем все операторы по порядку
+    for applied_op in props.applied_endomorphisms:
+        endomorphism_obj = find_endomorphism_by_uuid(
+            applied_op.endomorphism_uuid)
+        if not endomorphism_obj:
+            continue
+        endomorphism_props = endomorphism_obj.endomorphism_props  # type: ignore
+
+        sphere_center = endomorphism_obj.location
+        sphere_radius = endomorphism_props.radius
+        if is_point_inside_sphere(vec, sphere_center, sphere_radius):
+            mat = mathutils.Matrix((
+                endomorphism_props.matrix_col0,
+                endomorphism_props.matrix_col1,
+                endomorphism_props.matrix_col2
+            )).transposed()  # Матрица по столбцам
+            vec = mat @ vec  # Применяем преобразование
+
+    return vec
+
+
 # Функция для изменения координат вектора при их изменении в панели свойств.
 def update_vector_end(self, context):
     obj = self.id_data  # объект, к которому привязаны свойства.
+
+    transformed_end = apply_endomorphisms(obj)
 
     # Обновляем положение точки.
     if self.vector_type == 'POINT':
         if obj.type == 'MESH':
             mesh = obj.data
-            mesh.vertices[0].co = self.vector_end
+            mesh.vertices[0].co = transformed_end
     # Обновляем направление и длину стрелки.
     elif self.vector_type == 'ARROW':
         obj.location = (0, 0, 0)
-        vec = mathutils.Vector(self.vector_end)
+        vec = transformed_end
         obj.rotation_mode = 'QUATERNION'
         if vec.length > 0:
             obj.rotation_quaternion = vec.to_track_quat('Z', 'Y')
@@ -37,6 +77,7 @@ def update_all_vectors(scene):
     for obj in bpy.data.objects:  # Перебираем все объекты и выбираем только наши вектора по свойству is_vector
         if hasattr(obj, "vector_props") and getattr(obj.vector_props, "is_vector", False):  # type: ignore
             props = obj.vector_props  # type: ignore
+            transformed_end = apply_endomorphisms(obj)
             # Для точки
             if props.vector_type == 'POINT' and obj.type == 'MESH':
                 if obj.data.vertices:  # type: ignore
@@ -45,19 +86,20 @@ def update_all_vectors(scene):
             # Для стрелки - пересчёт направления
             elif props.vector_type == 'ARROW' and obj.type == 'EMPTY':
                 obj.location = (0, 0, 0)
-                vec = mathutils.Vector(props.vector_end)
-                obj.rotation_mode = 'QUATERNION'
-                if vec.length > 0:
-                    obj.rotation_quaternion = vec.to_track_quat('Z', 'Y')
-                obj.scale = (1, 1, vec.length)
+                if transformed_end.length > 0:
+                    obj.rotation_mode = 'QUATERNION'
+                    obj.rotation_quaternion = transformed_end.to_track_quat(
+                        'Z', 'Y')
+                obj.scale = (1, 1, transformed_end.length)
 
 
 def get_operator_items(self, context):
     items = []
     for obj in bpy.data.objects:
-        if hasattr(obj, "endomorphism_props") and obj.endomorphism_props.uuid:
+        if hasattr(obj, "endomorphism_props") and obj.endomorphism_props.uuid:  # type: ignore
             # В качестве значения используем UUID, а в качестве текста — имя объекта
-            items.append((obj.endomorphism_props.uuid, obj.name, ""))
+            items.append((obj.endomorphism_props.uuid,  # type: ignore
+                         obj.name, ""))
     return items
 
 
@@ -86,7 +128,7 @@ class VectorProperties(bpy.types.PropertyGroup):
         default='POINT'
     )
     applied_endomorphisms: bpy.props.CollectionProperty(
-        type=VectorAppliedEndomorphism)
+        type=VectorAppliedEndomorphism)  # type: ignore
     applied_endomorphisms_index: bpy.props.IntProperty(default=-1)
 
 
@@ -158,13 +200,14 @@ class VECTOR_OT_add_endomorphism(bpy.types.Operator):
     )
 
     def execute(self, context):
-        vector_props = context.object.vector_props
+        vector_props = context.object.vector_props  # type: ignore
         # Добавляем пустой элемент и получаем ссылку на него
         new_op = vector_props.applied_endomorphisms.add()
         new_op.endomorphism_uuid = self.endomorphism_uuid  # Заполняем элемент
         vector_props.applied_endomorphisms_index = len(
             vector_props.applied_endomorphisms) - 1
 
+        update_vector_end(context.object.vector_props, context)  # type: ignore
         force_ui_redraw(context)
         return {'FINISHED'}
 
@@ -186,13 +229,14 @@ class VECTOR_OT_remove_endomorphism(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        vector_props = context.object.vector_props
+        vector_props = context.object.vector_props  # type: ignore
         index = vector_props.applied_endomorphisms_index
         if index >= 0:
             vector_props.applied_endomorphisms.remove(index)
             vector_props.applied_endomorphisms_index = min(
                 index, len(vector_props.applied_endomorphisms) - 1)
 
+        update_vector_end(context.object.vector_props, context)  # type: ignore
         force_ui_redraw(context)
         return {'FINISHED'}
 
@@ -206,7 +250,7 @@ class VECTOR_OT_move_endomorphism(bpy.types.Operator):
         items=[('UP', 'Up', ''), ('DOWN', 'Down', '')])
 
     def execute(self, context):
-        vector_props = context.object.vector_props
+        vector_props = context.object.vector_props  # type: ignore
         index = vector_props.applied_endomorphisms_index
         new_index = index + (1 if self.direction == 'DOWN' else -1)
 
@@ -214,6 +258,7 @@ class VECTOR_OT_move_endomorphism(bpy.types.Operator):
             vector_props.applied_endomorphisms.move(index, new_index)
             vector_props.applied_endomorphisms_index = new_index
 
+        update_vector_end(context.object.vector_props, context)  # type: ignore
         force_ui_redraw(context)
         return {'FINISHED'}
 
@@ -226,7 +271,7 @@ class VECTOR_UL_endomorphisms_list(bpy.types.UIList):
         # Выбираем подходящие эндоморфизмы. Если несколько - берём первый.
         endomorphism_obj = next((obj for obj in bpy.data.objects
                                  if hasattr(obj, "endomorphism_props") and
-                                 obj.endomorphism_props.uuid == endomorphism_uuid), None)
+                                 obj.endomorphism_props.uuid == endomorphism_uuid), None)  # type: ignore
 
         if endomorphism_obj:
             layout.label(text=endomorphism_obj.name)
@@ -273,18 +318,18 @@ class Vector_PT_Panel(bpy.types.Panel):
         row.template_list(
             "VECTOR_UL_endomorphisms_list",
             "",
-            context.object.vector_props,
+            context.object.vector_props,  # type: ignore
             "applied_endomorphisms",
-            context.object.vector_props,
+            context.object.vector_props,  # type: ignore
             "applied_endomorphisms_index"
         )
         col = row.column(align=True)
         col.operator("vector.add_endomorphism", icon='ADD', text="")
         col.operator("vector.remove_endomorphism", icon='REMOVE', text="")
         col.operator("vector.move_endomorphism", icon='TRIA_UP',
-                     text="").direction = 'UP'
+                     text="").direction = 'UP'  # type: ignore
         col.operator("vector.move_endomorphism", icon='TRIA_DOWN',
-                     text="").direction = 'DOWN'
+                     text="").direction = 'DOWN'  # type: ignore
 
 
 # Отображение нового типа в панели создания объектов (shift + A)
